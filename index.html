@@ -455,6 +455,22 @@
   <script>
     const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyCBAhQvlVAjuzTmlUZrfJJq1X2s4atxVjkuf-dYFxgea4ZMMbEeWl7nEhk4S2te1Ao/exec';
 
+    async function postToAppsScript(payload) {
+      const response = await fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload)
+      });
+      const text = await response.text();
+      let result;
+      try { result = JSON.parse(text); }
+      catch { throw new Error('El servidor devolvió una respuesta que no es JSON.'); }
+      if (!response.ok || result.error || result.success === false) {
+        throw new Error(result.error || `Error HTTP ${response.status}`);
+      }
+      return result;
+    }
+
     let allData = {};
     let activeDni = null;
     let rawResumenRows = [];
@@ -597,7 +613,7 @@
       const item = allData[dni];
       const nombre = item ? getAnyValue(item, 'POSTULANTE', 'NOMBRE COMPLETO') : 'este beneficiario';
       
-      if (!confirm(`⚠️ ¿Estás seguro de que deseas ELIMINAR permanentemente a ${nombre} (DNI: ${dni})?\n\nEsta acción eliminará sus datos de Google Sheets y enviará sus archivos a la papelera de Drive.`)) {
+      if (!confirm(`⚠️ ¿Estás seguro de que deseas ELIMINAR permanentemente a ${nombre} (DNI: ${dni})?\n\nEsta acción eliminará sus filas de Google Sheets. Los archivos de Drive no se eliminarán.`)) {
         return;
       }
 
@@ -609,22 +625,12 @@
       }
 
       try {
-        const response = await fetch(APPS_SCRIPT_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({
+        const resJson = await postToAppsScript({
             action: 'deleteBeneficiary',
             dni: dni
-          })
         });
-
-        const resJson = await response.json();
-
-        if (resJson.status === 'success') {
-          showToast(`✅ Beneficiario (DNI ${dni}) eliminado correctamente.`, 'success');
-        } else {
-          showToast(`✅ Registro procesado en Drive.`, 'info');
-        }
+        if (!resJson.success || resJson.deletedRows === 0) throw new Error(resJson.error || 'No se encontraron filas para ese DNI.');
+        showToast(`✅ Beneficiario (DNI ${dni}) eliminado correctamente.`, 'success');
 
         activeDni = null;
         document.getElementById('kardexContent').innerHTML = `
@@ -635,16 +641,12 @@
           </div>`;
         fetchData();
       } catch (err) {
-        // En caso de que Apps Script responda con texto plano u objeto CORS
-        showToast('✅ Solicitud de eliminación enviada.', 'success');
-        activeDni = null;
-        document.getElementById('kardexContent').innerHTML = `
-          <div class="m-auto p-12 text-center text-slate-400 flex flex-col items-center">
-            <i class="fa-regular fa-address-card text-6xl mb-3 text-slate-300"></i>
-            <h3 class="text-base font-semibold text-slate-600 mb-1">Sin beneficiario seleccionado</h3>
-            <p class="text-xs max-w-sm text-slate-400">Selecciona un beneficiario del panel izquierdo o presiona "Nuevo Beneficiario" para registrar uno nuevo.</p>
-          </div>`;
-        fetchData();
+        showToast(`Error al eliminar: ${err.message || 'no se pudo confirmar la operación.'}`, 'error');
+      } finally {
+        if (deleteBtn) {
+          deleteBtn.disabled = false;
+          deleteBtn.innerHTML = origText;
+        }
       }
     }
 
@@ -767,21 +769,16 @@
       const tableHtml = tableEl ? tableEl.outerHTML : '';
 
       try {
-        await fetch(APPS_SCRIPT_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({
+        await postToAppsScript({
             action: 'sendSummaryEmail',
             email: recipient,
             htmlTable: tableHtml
-          })
         });
 
         showToast(`✅ Resumen enviado exitosamente a ${recipient}`, 'success');
         closeSendEmailModal();
       } catch (err) {
-        showToast('Solicitud procesada con Google Drive.', 'info');
-        closeSendEmailModal();
+        showToast(`Error al enviar el correo: ${err.message || 'no se pudo confirmar el envío.'}`, 'error');
       } finally {
         btn.innerHTML = origText;
         btn.disabled = false;
@@ -907,7 +904,7 @@
         fieldsHtml += '</div>';
 
         tabContentsHtml += `
-          <div id="${tabId}" class="add-modal-tab-content ${activeContentClass}">
+          <div id="${tabId}" data-sheet-name="${sheetName}" class="add-modal-tab-content ${activeContentClass}">
             <h4 class="font-bold text-slate-700 uppercase tracking-wider text-xs border-b border-slate-200 pb-2 mb-3.5 flex items-center gap-1.5">
               <i class="fa-solid fa-folder-open text-teal-600"></i> Campos de la Pestaña: ${sheetName}
             </h4>
@@ -969,26 +966,30 @@
       const payload = {
         action: "addBeneficiary",
         beneficiary: newBeneficiary,
+        beneficiariesBySheet: {},
         photoBase64: photosState.modal.base64,
         photoMimeType: photosState.modal.mime,
         extraFiles: extraFilesState
       };
 
-      try {
-        await fetch(APPS_SCRIPT_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify(payload)
+      form.querySelectorAll('.add-modal-tab-content').forEach(tab => {
+        const sheetName = tab.dataset.sheetName;
+        const fields = {};
+        tab.querySelectorAll('input[name]').forEach(input => {
+          if (input.value.trim()) fields[input.name] = input.value.trim();
         });
+        if (sheetName && Object.keys(fields).length) payload.beneficiariesBySheet[sheetName] = fields;
+      });
+
+      try {
+        await postToAppsScript(payload);
 
         showToast('✅ Beneficiario y archivos guardados en Google Drive', 'success');
         closeAddModal();
         activeDni = dniVal;
         fetchData();
       } catch (err) {
-        showToast('✅ Registro enviado a Google Drive.', 'info');
-        closeAddModal();
-        fetchData();
+        showToast(`Error al registrar: ${err.message || 'no se pudo confirmar el registro.'}`, 'error');
       } finally {
         btn.innerHTML = origText;
         btn.disabled = false;
@@ -1142,6 +1143,8 @@
         const res = await fetch(url, { cache: 'no-store' });
         const text = await res.text();
         const json = JSON.parse(text);
+
+        if (json.error) throw new Error(json.error);
 
         if (!json.data || json.data.length === 0) {
           tbody.innerHTML = '<tr><td colspan="18" class="p-4 text-center text-slate-400">No se encontraron datos en la pestaña RESUMEN.</td></tr>';
@@ -1309,9 +1312,17 @@
       saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Guardando...';
       saveBtn.disabled = true;
 
-      const inputs = document.querySelectorAll('.kardex-input');
       const updates = {};
-      inputs.forEach(input => {
+      const updatesBySheet = {};
+      document.querySelectorAll('.dynamic-tab-content').forEach(tab => {
+        const sheetName = tab.querySelector('h3')?.textContent?.replace(/^.*Pestaña:\s*/i, '').trim();
+        if (sheetName) updatesBySheet[sheetName] = {};
+        tab.querySelectorAll('.kardex-input').forEach(input => {
+          const key = input.getAttribute('data-key');
+          if (key && sheetName) updatesBySheet[sheetName][key] = input.value.trim();
+        });
+      });
+      document.querySelectorAll('#obsTextarea, #kardexContent select.kardex-input').forEach(input => {
         const key = input.getAttribute('data-key');
         if (key) updates[key] = input.value.trim();
       });
@@ -1319,26 +1330,22 @@
       const payload = {
         dni: activeDni,
         updates: updates,
-        photoBase64: photosState.modulo.base64 || photosState.modal.base64,
-        photoMimeType: photosState.modulo.mime || photosState.modal.mime,
+        updatesBySheet: updatesBySheet,
+        photoBase64: photosState.modulo.base64,
+        photoMimeType: photosState.modulo.mime,
         dniAnversoBase64: photosState.dniAnverso.base64,
         dniReversoBase64: photosState.dniReverso.base64
       };
 
       try {
-        await fetch(APPS_SCRIPT_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify(payload)
-        });
+        await postToAppsScript(payload);
         showToast('✅ Ficha y fotografías actualizadas en Google Drive', 'success');
         photosState.modulo.base64 = null;
         photosState.dniAnverso.base64 = null;
         photosState.dniReverso.base64 = null;
         fetchData();
       } catch (err) {
-        showToast('✅ Cambios enviados a Google Drive.', 'info');
-        fetchData();
+        showToast(`Error al guardar: ${err.message || 'no se pudo confirmar el guardado.'}`, 'error');
       } finally {
         saveBtn.innerHTML = originalText;
         saveBtn.disabled = false;
