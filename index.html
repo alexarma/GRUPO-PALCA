@@ -766,16 +766,25 @@
       btn.disabled = true;
 
       const tableEl = document.getElementById('resumenExcelTable');
-      const tableHtml = tableEl ? tableEl.outerHTML : '';
+      const csvData = tableEl ? Array.from(tableEl.rows).map(row =>
+        Array.from(row.cells).map(cell => {
+          const value = String(cell.innerText || cell.textContent || '').replace(/\s+/g, ' ').trim();
+          return `"${value.replace(/"/g, '""')}"`;
+        }).join(',')
+      ).join('\r\n') : '';
+      if (!csvData) {
+        showToast('No hay datos del resumen para adjuntar.', 'warning');
+        return;
+      }
 
       try {
         await postToAppsScript({
             action: 'sendSummaryEmail',
             email: recipient,
-            htmlTable: tableHtml
+            csvData: csvData
         });
 
-        showToast(`✅ Resumen enviado exitosamente a ${recipient}`, 'success');
+        showToast(`✅ Resumen enviado a ${recipient} con el archivo CSV adjunto.`, 'success');
         closeSendEmailModal();
       } catch (err) {
         showToast(`Error al enviar el correo: ${err.message || 'no se pudo confirmar el envío.'}`, 'error');
