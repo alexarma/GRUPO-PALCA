@@ -128,7 +128,7 @@
   <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
 
     <!-- 📊 TARJETAS DE MÉTRICAS RÁPIDAS (KPIs) -->
-    <section id="kpiSection" class="grid grid-cols-2 sm:grid-cols-4 gap-4 no-print">
+    <section id="kpiSection" class="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-5 gap-4 no-print">
       <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center space-x-3">
         <div class="bg-teal-100 text-teal-800 p-3 rounded-lg"><i class="fa-solid fa-users text-lg"></i></div>
         <div>
@@ -160,6 +160,13 @@
           <h3 class="text-xl font-black text-slate-800" id="kpiObservados">0</h3>
         </div>
       </div>
+      <div class="bg-white p-4 rounded-xl border border-amber-200 shadow-sm flex items-center space-x-3">
+        <div class="bg-amber-100 text-amber-800 p-3 rounded-lg"><i class="fa-solid fa-circle-question text-lg"></i></div>
+        <div>
+          <p class="text-[11px] font-bold text-amber-700 uppercase">Pendientes de validar</p>
+          <h3 class="text-xl font-black text-slate-800" id="kpiPendientes">0</h3>
+        </div>
+      </div>
     </section>
 
     <!-- 🔍 BARRA DE FILTROS AVANZADOS MULTICRITERIO -->
@@ -177,6 +184,7 @@
           <label class="block font-bold text-slate-600 mb-1"><i class="fa-solid fa-filter text-teal-600 mr-1"></i> Estado del Expediente</label>
           <select id="filterEstado" onchange="filterBeneficiaries()" class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 font-medium focus:outline-none focus:border-teal-500">
             <option value="">Todos los Estados</option>
+            <option value="__PENDING__">⚪ Pendiente de validar</option>
             <option value="OBSERVADO">🔴 OBSERVADO</option>
             <option value="EN TRÁMITE">🟡 EN TRÁMITE</option>
             <option value="SUBSANADO">🔵 SUBSANADO</option>
@@ -1089,21 +1097,24 @@
       let calaminaCount = 0;
       let aligeradoCount = 0;
       let observadosCount = 0;
+      let pendientesCount = 0;
 
       dnis.forEach(dni => {
         const item = allData[dni];
         const modulo = getAnyValue(item, 'MODULO', 'TIPO MODULO', 'MÓDULO').toUpperCase();
-        const estado = getAnyValue(item, 'ESTADO', 'ESTADO EXPEDIENTE').toUpperCase();
+        const estado = canonicalEstado(getExpedienteStatus(item));
 
         if (modulo.includes('CALAMINA')) calaminaCount++;
         if (modulo.includes('ALIGERADO')) aligeradoCount++;
-        if (estado.includes('OBSERVADO')) observadosCount++;
+        if (estado === 'OBSERVADO') observadosCount++;
+        if (!estado) pendientesCount++;
       });
 
       document.getElementById('kpiTotal').innerText = total;
       document.getElementById('kpiCalamina').innerText = calaminaCount;
       document.getElementById('kpiAligerado').innerText = aligeradoCount;
       document.getElementById('kpiObservados').innerText = observadosCount;
+      document.getElementById('kpiPendientes').innerText = pendientesCount;
     }
 
     function exportBeneficiariesToCSV() {
@@ -1114,7 +1125,7 @@
       dnis.forEach(dni => {
         const item = allData[dni];
         const nombre = getAnyValue(item, 'POSTULANTE', 'NOMBRE COMPLETO').replace(/,/g, '');
-        const estado = getAnyValue(item, 'ESTADO', 'ESTADO EXPEDIENTE').replace(/,/g, '');
+        const estado = getExpedienteStatus(item).replace(/,/g, '');
         const dist = getAnyValue(item, 'DISTRITO').replace(/,/g, '');
         const prov = getAnyValue(item, 'PROVINCIA').replace(/,/g, '');
         const mod = getAnyValue(item, 'MODULO', 'TIPO MODULO').replace(/,/g, '');
@@ -1328,11 +1339,13 @@
         if (sheetName) updatesBySheet[sheetName] = {};
         tab.querySelectorAll('.kardex-input').forEach(input => {
           const key = input.getAttribute('data-key');
+          if (key === 'ESTADO' && input.value.trim() === input.dataset.originalValue) return;
           if (key && sheetName) updatesBySheet[sheetName][key] = input.value.trim();
         });
       });
       document.querySelectorAll('#obsTextarea, #kardexContent select.kardex-input').forEach(input => {
         const key = input.getAttribute('data-key');
+        if (key === 'ESTADO' && input.value.trim() === input.dataset.originalValue) return;
         if (key) updates[key] = input.value.trim();
       });
 
@@ -1368,7 +1381,7 @@
       const currentSelected = zoneSelect.value;
       zoneSelect.innerHTML = '<option value="">🌎 Todas las Zonas / Distritos</option>';
 
-      const zonesSet = new Set();
+      const zonesByKey = new Map();
       Object.keys(allData).forEach(dni => {
         const item = allData[dni];
         const dist = getAnyValue(item, 'DISTRITO');
@@ -1379,11 +1392,15 @@
           let label = dist;
           if (prov !== '-' && prov !== dist) label += `, ${prov}`;
           if (dept !== '-' && dept !== prov) label += ` (${dept})`;
-          zonesSet.add(label);
+          const key = normalizeLookupText(label);
+          const existing = zonesByKey.get(key);
+          if (!existing || (/[áéíóúñ]/i.test(label) && !/[áéíóúñ]/i.test(existing))) {
+            zonesByKey.set(key, label);
+          }
         }
       });
 
-      Array.from(zonesSet).sort().forEach(zone => {
+      Array.from(zonesByKey.values()).sort((a, b) => a.localeCompare(b, 'es')).forEach(zone => {
         const opt = document.createElement('option');
         opt.value = zone;
         opt.textContent = `📍 ${zone}`;
@@ -1394,7 +1411,7 @@
     }
 
     function getStatusBadgeHtml(estadoVal) {
-      const est = (estadoVal || '').toUpperCase();
+      const est = canonicalEstado(estadoVal);
       if (est.includes('OBSERVADO')) {
         return '<span class="text-[9px] bg-rose-100 text-rose-800 font-bold px-2 py-0.5 rounded border border-rose-200"><i class="fa-solid fa-circle-exclamation mr-0.5"></i> OBSERVADO</span>';
       } else if (est.includes('TRÁMITE') || est.includes('TRAMITE')) {
@@ -1406,7 +1423,7 @@
       } else if (est.includes('INADMISIBLE')) {
         return '<span class="text-[9px] bg-slate-200 text-slate-800 font-bold px-2 py-0.5 rounded border border-slate-300"><i class="fa-solid fa-ban mr-0.5"></i> INADMISIBLE</span>';
       }
-      return '<span class="text-[9px] bg-slate-100 text-slate-600 font-semibold px-2 py-0.5 rounded">SIN ESTADO</span>';
+      return '<span class="text-[9px] bg-amber-50 text-amber-800 font-semibold px-2 py-0.5 rounded border border-amber-200"><i class="fa-solid fa-circle-question mr-0.5"></i> PENDIENTE DE VALIDAR</span>';
     }
 
     function renderBeneficiaryList() {
@@ -1426,7 +1443,7 @@
         const prov = getAnyValue(item, 'PROVINCIA');
         const dept = getAnyValue(item, 'DEPARTAMENTO');
         const modulo = getAnyValue(item, 'MODULO', 'TIPO MODULO').toUpperCase();
-        const estado = getAnyValue(item, 'ESTADO', 'ESTADO EXPEDIENTE').toUpperCase();
+        const estado = canonicalEstado(getExpedienteStatus(item));
 
         let zoneLabel = '';
         if (dist !== '-') {
@@ -1436,8 +1453,8 @@
         }
 
         const matchesQuery = `${dni} ${nombre} ${dist} ${prov} ${dept}`.toLowerCase().includes(query);
-        const matchesZone = !selectedZone || zoneLabel === selectedZone;
-        const matchesEstado = !selectedEstado || estado.includes(selectedEstado);
+        const matchesZone = !selectedZone || normalizeLookupText(zoneLabel) === normalizeLookupText(selectedZone);
+        const matchesEstado = !selectedEstado || (selectedEstado === '__PENDING__' ? !estado : estado === selectedEstado);
         const matchesModulo = !selectedModulo || modulo.includes(selectedModulo);
 
         return matchesQuery && matchesZone && matchesEstado && matchesModulo;
@@ -1466,7 +1483,7 @@
         const distrito = getAnyValue(item, 'DISTRITO') || 'S/D';
         const dept = getAnyValue(item, 'DEPARTAMENTO');
         const modulo = getAnyValue(item, 'MODULO', 'TIPO MODULO') || '-';
-        const estado = getAnyValue(item, 'ESTADO', 'ESTADO EXPEDIENTE');
+        const estado = getExpedienteStatus(item);
 
         const card = document.createElement('div');
         card.className = `p-3.5 hover:bg-slate-50 cursor-pointer transition flex items-center justify-between border-b border-slate-100 ${activeDni === dni ? 'bg-teal-50/80 border-l-4 border-teal-500' : ''}`;
@@ -1532,6 +1549,53 @@
       return '-';
     }
 
+    function normalizeLookupText(value) {
+      return String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toUpperCase();
+    }
+
+    function getExpedienteStatus(beneficiary) {
+      if (!beneficiary) return '';
+      const statusHeaders = new Set([
+        'ESTADO',
+        'ESTADO EXPEDIENTE',
+        'ESTADO DE TRAMITE',
+        'ESTADO TRAMITE'
+      ]);
+      const readStatus = row => {
+        if (!row || typeof row !== 'object') return '';
+        for (const [key, value] of Object.entries(row)) {
+          if (statusHeaders.has(normalizeLookupText(key)) && isValidValue(value)) {
+            return String(value).trim();
+          }
+        }
+        return '';
+      };
+
+      for (const rows of Object.values(beneficiary.sheets || {})) {
+        if (!Array.isArray(rows)) continue;
+        for (const row of rows) {
+          const status = readStatus(row);
+          if (status) return status;
+        }
+      }
+      return readStatus(beneficiary);
+    }
+
+    function canonicalEstado(value) {
+      const status = normalizeLookupText(value);
+      if (status.includes('OBSERVADO')) return 'OBSERVADO';
+      if (status.includes('TRAMITE')) return 'EN TRÁMITE';
+      if (status.includes('SUBSANADO')) return 'SUBSANADO';
+      if (status.includes('APTO')) return 'APTO';
+      if (status.includes('INADMISIBLE')) return 'INADMISIBLE';
+      return '';
+    }
+
     function renderKardex(dni) {
       const b = allData[dni];
       const container = document.getElementById('kardexContent');
@@ -1545,7 +1609,8 @@
       const fotoDniAnversoUrl = getAnyValue(b, 'FOTO_DNI_ANVERSO', 'DNI_ANVERSO');
       const fotoDniReversoUrl = getAnyValue(b, 'FOTO_DNI_REVERSO', 'DNI_REVERSO');
       const observacionVal = getAnyValue(b, 'OBSERVACION', 'OBSERVACIONES', 'OBSERVACION EXPEDIENTE');
-      const estadoVal = getAnyValue(b, 'ESTADO', 'ESTADO EXPEDIENTE');
+      const estadoVal = getExpedienteStatus(b);
+      const estadoCode = canonicalEstado(estadoVal);
 
       const sheetNames = b.sheets ? Object.keys(b.sheets) : [];
       let tabsHeaderHtml = '';
@@ -1646,12 +1711,13 @@
               <label class="block font-bold text-slate-700 text-[11px] uppercase mb-1">
                 <i class="fa-solid fa-flag text-teal-600 mr-1"></i> Estado del Expediente:
               </label>
-              <select data-key="ESTADO" class="kardex-input bg-white border border-slate-300 rounded px-2.5 py-1.5 font-bold text-xs text-slate-800 focus:outline-none focus:border-teal-500">
-                <option value="OBSERVADO" ${estadoVal.includes('OBSERVADO') ? 'selected' : ''}>🔴 OBSERVADO</option>
-                <option value="EN TRÁMITE" ${(estadoVal.includes('TRÁMITE') || estadoVal.includes('TRAMITE')) ? 'selected' : ''}>🟡 EN TRÁMITE</option>
-                <option value="SUBSANADO" ${estadoVal.includes('SUBSANADO') ? 'selected' : ''}>🔵 SUBSANADO</option>
-                <option value="APTO" ${estadoVal.includes('APTO') ? 'selected' : ''}>🟢 APTO</option>
-                <option value="INADMISIBLE" ${estadoVal.includes('INADMISIBLE') ? 'selected' : ''}>⚪ INADMISIBLE</option>
+              <select data-key="ESTADO" data-original-value="${estadoCode}" class="kardex-input bg-white border border-slate-300 rounded px-2.5 py-1.5 font-bold text-xs text-slate-800 focus:outline-none focus:border-teal-500">
+                <option value="" ${estadoCode === '' ? 'selected' : ''}>⚪ SIN ESTADO — PENDIENTE DE VALIDAR</option>
+                <option value="OBSERVADO" ${estadoCode === 'OBSERVADO' ? 'selected' : ''}>🔴 OBSERVADO</option>
+                <option value="EN TRÁMITE" ${estadoCode === 'EN TRÁMITE' ? 'selected' : ''}>🟡 EN TRÁMITE</option>
+                <option value="SUBSANADO" ${estadoCode === 'SUBSANADO' ? 'selected' : ''}>🔵 SUBSANADO</option>
+                <option value="APTO" ${estadoCode === 'APTO' ? 'selected' : ''}>🟢 APTO</option>
+                <option value="INADMISIBLE" ${estadoCode === 'INADMISIBLE' ? 'selected' : ''}>⚪ INADMISIBLE</option>
               </select>
             </div>
 
