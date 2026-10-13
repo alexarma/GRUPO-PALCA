@@ -604,7 +604,11 @@
         if (activeDni !== selectedDni) return;
         photosState[type].base64 = evt.target.result;
         const imgEl = document.getElementById(`kardexImg_${type}`);
-        if (imgEl) imgEl.src = photosState[type].base64;
+        if (imgEl) {
+          imgEl.src = photosState[type].base64;
+          imgEl.classList.remove('hidden');
+          imgEl.parentElement?.querySelector('i')?.classList.add('hidden');
+        }
         showToast(`Fotografía (${type}) seleccionada.`, 'info');
       };
       reader.readAsDataURL(file);
@@ -1633,6 +1637,11 @@
       return '';
     }
 
+    function photoUrl(value) {
+      const url = String(value || '').trim();
+      return /^https?:\/\/[^\s]+$/i.test(url) ? url : '';
+    }
+
     function renderKardex(dni) {
       const b = allData[dni];
       if (photosDni !== dni) {
@@ -1647,8 +1656,8 @@
       const dept = getAnyValue(b, 'DEPARTAMENTO');
       const tlf = getAnyValue(b, 'TELEF.', 'CELULAR');
       const fotoUrl = getAnyValue(b, 'FOTO_INSPECCION', 'FOTO');
-      const fotoDniAnversoUrl = getAnyValue(b, 'FOTO_DNI_ANVERSO', 'DNI_ANVERSO');
-      const fotoDniReversoUrl = getAnyValue(b, 'FOTO_DNI_REVERSO', 'DNI_REVERSO');
+      const fotoDniAnversoUrl = photoUrl(getAnyValue(b, 'FOTO_DNI_ANVERSO', 'DNI_ANVERSO'));
+      const fotoDniReversoUrl = photoUrl(getAnyValue(b, 'FOTO_DNI_REVERSO', 'DNI_REVERSO'));
       const observacionVal = getAnyValue(b, 'OBSERVACION', 'OBSERVACIONES', 'OBSERVACION EXPEDIENTE');
       const estadoVal = getExpedienteStatus(b);
       const estadoCode = canonicalEstado(estadoVal);
@@ -1711,7 +1720,7 @@
         tabsContentHtml = `<div class="dynamic-tab-content">${fieldsHtml}</div>`;
       }
 
-      const photoSrc = fotoUrl !== '-' ? fotoUrl : '';
+      const photoSrc = photoUrl(fotoUrl);
 
       container.innerHTML = `
         <div class="bg-slate-900 text-white p-5 flex flex-wrap justify-between items-center gap-4">
@@ -1783,7 +1792,7 @@
               
               <div class="bg-white p-2 rounded-lg border border-slate-200 flex items-center gap-2">
                 <div class="w-10 h-10 bg-slate-100 rounded overflow-hidden border border-slate-300 flex-shrink-0 flex items-center justify-center">
-                  ${photoSrc ? `<img id="kardexImg_modulo" src="${photoSrc}" class="w-full h-full object-cover">` : `<i class="fa-solid fa-house text-slate-300"></i>`}
+                  <img id="kardexImg_modulo" ${photoSrc ? `src="${escapeHtml(photoSrc)}"` : ''} class="w-full h-full object-cover ${photoSrc ? '' : 'hidden'}"><i class="fa-solid fa-house text-slate-300 ${photoSrc ? 'hidden' : ''}"></i>
                 </div>
                 <div class="overflow-hidden text-[10px]">
                   <span class="font-bold text-slate-700 block truncate">1. Foto Módulo / Vivienda</span>
@@ -1793,7 +1802,7 @@
 
               <div class="bg-white p-2 rounded-lg border border-slate-200 flex items-center gap-2">
                 <div class="w-10 h-10 bg-slate-100 rounded overflow-hidden border border-slate-300 flex-shrink-0 flex items-center justify-center">
-                  ${fotoDniAnversoUrl !== '-' ? `<img id="kardexImg_dniAnverso" src="${fotoDniAnversoUrl}" class="w-full h-full object-cover">` : `<i class="fa-solid fa-address-card text-slate-300"></i>`}
+                  <img id="kardexImg_dniAnverso" ${fotoDniAnversoUrl ? `src="${escapeHtml(fotoDniAnversoUrl)}"` : ''} class="w-full h-full object-cover ${fotoDniAnversoUrl ? '' : 'hidden'}"><i class="fa-solid fa-address-card text-slate-300 ${fotoDniAnversoUrl ? 'hidden' : ''}"></i>
                 </div>
                 <div class="overflow-hidden text-[10px]">
                   <span class="font-bold text-slate-700 block truncate">2. DNI Anverso (Frontal)</span>
@@ -1803,7 +1812,7 @@
 
               <div class="bg-white p-2 rounded-lg border border-slate-200 flex items-center gap-2">
                 <div class="w-10 h-10 bg-slate-100 rounded overflow-hidden border border-slate-300 flex-shrink-0 flex items-center justify-center">
-                  ${fotoDniReversoUrl !== '-' ? `<img id="kardexImg_dniReverso" src="${fotoDniReversoUrl}" class="w-full h-full object-cover">` : `<i class="fa-solid fa-id-badge text-slate-300"></i>`}
+                  <img id="kardexImg_dniReverso" ${fotoDniReversoUrl ? `src="${escapeHtml(fotoDniReversoUrl)}"` : ''} class="w-full h-full object-cover ${fotoDniReversoUrl ? '' : 'hidden'}"><i class="fa-solid fa-id-badge text-slate-300 ${fotoDniReversoUrl ? 'hidden' : ''}"></i>
                 </div>
                 <div class="overflow-hidden text-[10px]">
                   <span class="font-bold text-slate-700 block truncate">3. DNI Reverso (Posterior)</span>
