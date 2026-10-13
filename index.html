@@ -623,14 +623,34 @@
       }
     }
 
-    // 🗑️ FUNCIÓN CORREGIDA Y BLINDADA PARA ELIMINAR BENEFICIARIO
+    let pendingDeleteDni = null;
+    function closeDeleteConfirmation() {
+      pendingDeleteDni = null;
+      document.getElementById('deleteConfirmationModal')?.remove();
+    }
+    function validateDeleteConfirmation() {
+      const input = document.getElementById('deleteConfirmationDni');
+      const button = document.getElementById('deleteConfirmationSubmit');
+      if (button) button.disabled = !pendingDeleteDni || input?.value.trim() !== pendingDeleteDni;
+    }
     async function confirmDeleteBeneficiary(dni) {
       const item = allData[dni];
+      if (!item) return showToast('Beneficiario no encontrado.', 'error');
       const nombre = item ? getAnyValue(item, 'POSTULANTE', 'NOMBRE COMPLETO') : 'este beneficiario';
-      
-      if (!confirm(`⚠️ ¿Estás seguro de que deseas ELIMINAR permanentemente a ${nombre} (DNI: ${dni})?\n\nEsta acción eliminará sus filas de Google Sheets. Los archivos de Drive no se eliminarán.`)) {
-        return;
-      }
+      closeDeleteConfirmation();
+      pendingDeleteDni = String(dni);
+      const modal = document.createElement('div');
+      modal.id = 'deleteConfirmationModal';
+      modal.className = 'fixed inset-0 z-[100] bg-slate-950/60 flex items-center justify-center p-4';
+      modal.innerHTML = `<section role="dialog" aria-modal="true" aria-labelledby="deleteConfirmationTitle" class="bg-white rounded-xl p-6 max-w-md w-full text-slate-800 shadow-xl"><h2 id="deleteConfirmationTitle" class="text-lg font-bold mb-3">Confirmar eliminación</h2><p class="mb-2">Se eliminarán las filas de <strong>${escapeHtml(nombre)}</strong> en Google Sheets. Los archivos de Drive se conservarán.</p><label for="deleteConfirmationDni" class="block mb-2">Escribe el DNI <strong>${escapeHtml(dni)}</strong> para confirmar:</label><input id="deleteConfirmationDni" inputmode="numeric" autocomplete="off" maxlength="8" oninput="validateDeleteConfirmation()" class="w-full border rounded p-2 mb-4"><div class="flex justify-end gap-3"><button onclick="closeDeleteConfirmation()" class="border rounded px-4 py-2">Cancelar</button><button id="deleteConfirmationSubmit" disabled onclick="executeConfirmedDeletion()" class="bg-rose-700 text-white rounded px-4 py-2 disabled:opacity-40">Eliminar definitivamente</button></div></section>`;
+      document.body.appendChild(modal);
+      document.getElementById('deleteConfirmationDni')?.focus();
+    }
+
+    async function executeConfirmedDeletion() {
+      const dni = pendingDeleteDni;
+      if (!dni || document.getElementById('deleteConfirmationDni')?.value.trim() !== dni) return;
+      closeDeleteConfirmation();
 
       const deleteBtn = document.getElementById('deleteBeneficiaryBtn');
       const origText = deleteBtn ? deleteBtn.innerHTML : '';
@@ -645,6 +665,13 @@
             dni: dni
         });
         if (!resJson.success || resJson.deletedRows === 0) throw new Error(resJson.error || 'No se encontraron filas para ese DNI.');
+        const verifyResponse = await fetch(APPS_SCRIPT_URL);
+        if (!verifyResponse.ok) throw new Error('No se pudo verificar la eliminación. Recarga la lista antes de volver a intentarlo.');
+        const verifyData = await verifyResponse.json();
+        if (verifyData[dni]) {
+          await fetchData();
+          throw new Error('El servidor dejó filas de este DNI sin eliminar. La ficha continúa en la lista; revisa sus hojas de origen.');
+        }
         showToast(`✅ Beneficiario (DNI ${dni}) eliminado correctamente.`, 'success');
 
         activeDni = null;
@@ -1348,7 +1375,7 @@
 
           const alignStyle = (c >= 3) ? 'text-align: center;' : 'text-align: left; padding-left: 10px;';
 
-          html += `<td bgcolor="${bgColor}" style="background-color: ${bgColor}; color: ${textColor}; border: 1px solid ${borderColor}; padding: 7px 10px; ${alignStyle} font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; font-weight: ${fontWeight}; white-space: nowrap;">${val}</td>`;
+          html += `<td bgcolor="${bgColor}" style="background-color: ${bgColor}; color: ${textColor}; border: 1px solid ${borderColor}; padding: 7px 10px; ${alignStyle} font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; font-weight: ${fontWeight}; white-space: nowrap;">${escapeHtml(val)}</td>`;
         }
 
         html += `</tr>`;
@@ -1667,6 +1694,17 @@
       const hasStatusColumn = sourceRows.some(row => Object.keys(row).some(key => statusHeaders.includes(normalizeLookupText(key))));
 
       const sheetNames = b.sheets ? Object.keys(b.sheets) : [];
+      const birthDates = [];
+      Object.entries(b.sheets || {}).forEach(([sheet, rows]) => {
+        (Array.isArray(rows) ? rows : []).forEach(row => Object.entries(row).forEach(([key, value]) => {
+          const header = normalizeLookupText(key);
+          if (/FECH/.test(header) && /NAC/.test(header) && /TITULAR/.test(header) && value && value !== '-') {
+            birthDates.push({sheet, date: formatDateField(key, value)});
+          }
+        }));
+      });
+      const birthWarning = new Set(birthDates.map(entry => entry.date)).size > 1
+        ? `<div class="bg-amber-50 border border-amber-300 text-amber-950 px-4 py-3 text-xs"><strong>Fecha de nacimiento por confirmar:</strong> ${birthDates.map(entry => `${escapeHtml(entry.sheet)}: ${escapeHtml(entry.date)}`).join(' · ')}. Comprueba el documento de identidad antes de corregir la hoja.</div>` : '';
       let tabsHeaderHtml = '';
       let tabsContentHtml = '';
 
@@ -1826,6 +1864,7 @@
 
         </div>
 
+        ${birthWarning}
         <div class="bg-slate-100 border-b border-slate-200 flex space-x-1 px-4 pt-2 overflow-x-auto text-xs font-semibold no-print custom-scrollbar">
           ${tabsHeaderHtml}
         </div>
