@@ -1840,8 +1840,21 @@
       return String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[char]));
     }
 
+    function formatDateField(keyName, value) {
+      const text = String(value ?? '');
+      if (!/FECH|NACIMIENTO/.test(normalizeLookupText(keyName))) return text;
+      const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:T|\s|$)/);
+      if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+      const native = text.match(/^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s+(\d{4})\s/);
+      if (native) {
+        const month = String(['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].indexOf(native[1]) + 1).padStart(2, '0');
+        return `${native[2].padStart(2, '0')}/${month}/${native[3]}`;
+      }
+      return text;
+    }
+
     function renderEditableField(keyName, value) {
-      const displayVal = (value !== null && value !== undefined && value !== '-') ? String(value) : '';
+      const displayVal = (value !== null && value !== undefined && value !== '-') ? formatDateField(keyName, value) : '';
       const safeKey = escapeHtml(keyName);
       const safeVal = escapeHtml(displayVal);
       if (['ESTADO', 'ESTADO EXPEDIENTE', 'ESTADO DE TRAMITE', 'ESTADO TRAMITE'].includes(normalizeLookupText(keyName))) {
@@ -1899,3 +1912,4 @@
   </script>
 </body>
 </html>
+
