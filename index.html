@@ -894,12 +894,29 @@
             cell.style.overflowWrap = 'anywhere';
             cell.style.fontSize = '9px';
             cell.style.padding = '4px 3px';
+            cell.style.width = '';
           });
           const columnCount = Math.max(...Array.from(table.rows).map(row => row.cells.length));
           const firstWidths = [4, 12, 24];
-          Array.from(table.rows).forEach(row => Array.from(row.cells).forEach((cell, index) => {
-            if (cell.colSpan === 1) cell.style.width = `${index < 3 ? firstWidths[index] : 60 / Math.max(1, columnCount - 3)}%`;
-          }));
+          const columns = document.createElement('colgroup');
+          for (let index = 0; index < columnCount; index++) {
+            const column = document.createElement('col');
+            column.style.width = `${index < 3 ? firstWidths[index] : 60 / Math.max(1, columnCount - 3)}%`;
+            columns.appendChild(column);
+          }
+          table.querySelectorAll('colgroup').forEach(group => group.remove());
+          table.insertBefore(columns, table.firstChild);
+          Array.from(table.rows).forEach((row, index) => {
+            if (index === 0 && Array.from(row.cells).slice(1).every(cell => !cell.textContent.trim())) {
+              row.cells[0].colSpan = columnCount;
+              while (row.cells.length > 1) row.deleteCell(1);
+            }
+            if (/^TOTAL/i.test(row.cells[0]?.textContent.trim() || '') && row.cells.length === columnCount && !row.cells[1].textContent.trim() && !row.cells[2].textContent.trim()) {
+              row.cells[0].colSpan = 3;
+              row.deleteCell(1);
+              row.deleteCell(1);
+            }
+          });
         }
       }
       return clone;
