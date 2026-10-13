@@ -896,13 +896,13 @@
             cell.style.whiteSpace = 'normal';
             cell.style.overflowWrap = 'anywhere';
             cell.style.wordBreak = 'break-all';
-            cell.style.lineHeight = '1.5';
+            cell.style.lineHeight = '1.25';
             if (cell.tagName === 'TH') {
               cell.style.whiteSpace = 'pre-line';
               cell.textContent = cell.textContent.trim().replace(/\s+/g, ' ').replace(/\/\s*/g, '/\n');
             }
-            cell.style.fontSize = '9px';
-            cell.style.padding = '4px 3px';
+            cell.style.fontSize = '8px';
+            cell.style.padding = '2px 3px';
             cell.style.width = '';
           });
           const columnCount = Math.max(...Array.from(table.rows).map(row => row.cells.length));
