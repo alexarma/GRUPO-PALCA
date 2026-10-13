@@ -1045,7 +1045,7 @@
 
       const payload = {
         action: "addBeneficiary",
-        beneficiary: newBeneficiary,
+        beneficiary: sheetSafeIdentityFields(newBeneficiary),
         beneficiariesBySheet: {},
         photoBase64: photosState.modal.base64,
         photoMimeType: photosState.modal.mime,
@@ -1058,7 +1058,7 @@
         tab.querySelectorAll('input[name]').forEach(input => {
           if (input.value.trim()) fields[input.name] = input.value.trim();
         });
-        if (sheetName && Object.keys(fields).length) payload.beneficiariesBySheet[sheetName] = fields;
+        if (sheetName && Object.keys(fields).length) payload.beneficiariesBySheet[sheetName] = sheetSafeIdentityFields(fields);
       });
 
       try {
@@ -1877,6 +1877,14 @@
 
     function escapeHtml(value) {
       return String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[char]));
+    }
+
+    function sheetSafeIdentityFields(fields) {
+      return Object.fromEntries(Object.entries(fields).map(([key, value]) => {
+        // Sheets interprets an initial apostrophe as text, preserving DNI zeros.
+        const isDni = /^DNI(?:\b|\/)/.test(normalizeLookupText(key));
+        return [key, isDni && /^\d{8}$/.test(String(value)) ? "'" + value : value];
+      }));
     }
 
     function formatDateField(keyName, value) {
