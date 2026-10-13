@@ -815,6 +815,7 @@
     function preparePdfElement(element) {
       const clone = element.cloneNode(true);
       clone.querySelectorAll('.no-print, button, input[type="file"]').forEach(node => node.remove());
+      clone.querySelectorAll('img').forEach(node => { if (!node.getAttribute('src')) node.remove(); });
       clone.querySelectorAll('.dynamic-tab-content').forEach(node => node.classList.remove('hidden'));
       clone.querySelectorAll('.custom-scrollbar').forEach(node => { node.style.maxHeight = 'none'; node.style.overflow = 'visible'; });
       clone.style.maxHeight = 'none';
