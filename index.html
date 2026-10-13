@@ -482,6 +482,7 @@
     let allData = {};
     let activeDni = null;
     let rawResumenRows = [];
+    let photosDni = null;
     
     let photosState = {
       modal: { base64: null, mime: 'image/jpeg' },
@@ -595,10 +596,12 @@
     function previewKardexPhoto(e, type) {
       const file = e.target.files[0];
       if (!file) return;
+      const selectedDni = activeDni;
       photosState[type].mime = file.type;
 
       const reader = new FileReader();
       reader.onload = function(evt) {
+        if (activeDni !== selectedDni) return;
         photosState[type].base64 = evt.target.result;
         const imgEl = document.getElementById(`kardexImg_${type}`);
         if (imgEl) imgEl.src = photosState[type].base64;
@@ -764,9 +767,10 @@
 
     async function submitSendEmail() {
       const recipient = document.getElementById('emailRecipientInput').value.trim();
-      if (!recipient || !recipient.includes('@')) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
         return showToast('Por favor, ingresa un correo electrónico válido.', 'warning');
       }
+      if (!rawResumenRows.length) return showToast('Espere a que cargue el resumen antes de enviarlo.', 'warning');
 
       const btn = document.getElementById('sendEmailSubmitBtn');
       const origText = btn.innerHTML;
@@ -782,6 +786,8 @@
       ).join('\r\n') : '';
       if (!csvData) {
         showToast('No hay datos del resumen para adjuntar.', 'warning');
+        btn.innerHTML = origText;
+        btn.disabled = false;
         return;
       }
 
@@ -802,7 +808,18 @@
       }
     }
 
-    function exportResumenPDF() {
+    function preparePdfElement(element) {
+      const clone = element.cloneNode(true);
+      clone.querySelectorAll('.no-print, button, input[type="file"]').forEach(node => node.remove());
+      clone.querySelectorAll('.dynamic-tab-content').forEach(node => node.classList.remove('hidden'));
+      clone.querySelectorAll('.custom-scrollbar').forEach(node => { node.style.maxHeight = 'none'; node.style.overflow = 'visible'; });
+      clone.style.maxHeight = 'none';
+      clone.style.overflow = 'visible';
+      return clone;
+    }
+
+    async function exportResumenPDF() {
+      if (!rawResumenRows.length) return showToast('Espere a que cargue el resumen antes de exportarlo.', 'warning');
       const element = document.getElementById('resumenTableContainer');
       if (!element) return;
 
@@ -814,11 +831,16 @@
         jsPDF:        { unit: 'in', format: 'a4', orientation: 'landscape' }
       };
 
-      html2pdf().set(opt).from(element).save();
       showToast('Generando archivo PDF...', 'info');
+      try {
+        await html2pdf().set(opt).from(preparePdfElement(element)).save();
+        showToast('Resumen PDF descargado.', 'success');
+      } catch (err) {
+        showToast('No se pudo generar el PDF del resumen. Inténtelo de nuevo.', 'error');
+      }
     }
 
-    function exportKardexPDF() {
+    async function exportKardexPDF() {
       const element = document.getElementById('kardexContent');
       if (!element || !activeDni) return showToast('Selecciona un beneficiario primero.', 'warning');
 
@@ -830,8 +852,13 @@
         jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' }
       };
 
-      html2pdf().set(opt).from(element).save();
-      showToast('Descargando Ficha Kardex en PDF...', 'info');
+      showToast('Generando Ficha Kardex en PDF...', 'info');
+      try {
+        await html2pdf().set(opt).from(preparePdfElement(element)).save();
+        showToast('Ficha Kardex PDF descargada.', 'success');
+      } catch (err) {
+        showToast('No se pudo generar el PDF de la ficha. Inténtelo de nuevo.', 'error');
+      }
     }
 
     function openAddModal() {
@@ -974,6 +1001,10 @@
       if (!dniVal) {
         return showToast('Por favor, ingresa al menos el campo DNI.', 'warning');
       }
+      if (!/^\d{8}$/.test(dniVal)) return showToast('El DNI debe contener exactamente 8 dígitos.', 'warning');
+      if (allData[dniVal]) return showToast('Ese DNI ya está registrado. Abra su ficha para actualizarlo.', 'warning');
+      const nameVal = newBeneficiary['POSTULANTE'] || newBeneficiary['NOMBRE COMPLETO'] || newBeneficiary['NOMBRE COMPLETO TITULAR'];
+      if (!nameVal) return showToast('Ingrese el nombre completo del postulante.', 'warning');
 
       const btn = document.getElementById('submitNewBtn');
       const origText = btn.innerHTML;
@@ -1066,13 +1097,12 @@
       try {
         const cleanUrl = APPS_SCRIPT_URL + '?v=' + new Date().getTime();
         const res = await fetch(cleanUrl, { cache: 'no-store' });
+        if (!res.ok) throw new Error(`Error HTTP ${res.status}`);
         const text = await res.text();
         
         let data = JSON.parse(text);
-        if (data.error) {
-          showToast('Error en Google Apps Script: ' + data.error, 'error');
-          return;
-        }
+        if (data.error) throw new Error(data.error);
+        if (!data || Array.isArray(data) || typeof data !== 'object') throw new Error('Formato de datos inválido.');
 
         allData = data;
         updateKPIs();
@@ -1086,6 +1116,7 @@
       } catch (err) {
         console.error("Error al conectar:", err);
         showToast('Error de conexión con Google Apps Script', 'error');
+        if (!Object.keys(allData).length) document.getElementById('beneficiaryList').innerHTML = '<div class="p-8 text-center text-rose-700 text-sm">No se pudieron cargar los beneficiarios. Pulse Actualizar para reintentar.</div>';
       } finally {
         refreshIcon.classList.remove('fa-spin');
       }
@@ -1121,17 +1152,18 @@
       const dnis = Object.keys(allData);
       if (dnis.length === 0) return showToast('No hay datos para exportar.', 'warning');
 
-      let csv = 'DNI,POSTULANTE,ESTADO,DISTRITO,PROVINCIA,MODULO,TELEFONO\n';
+      const csvCell = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
+      let csv = '\uFEFFDNI,POSTULANTE,ESTADO,DISTRITO,PROVINCIA,MODULO,TELEFONO\r\n';
       dnis.forEach(dni => {
         const item = allData[dni];
-        const nombre = getAnyValue(item, 'POSTULANTE', 'NOMBRE COMPLETO').replace(/,/g, '');
-        const estado = getExpedienteStatus(item).replace(/,/g, '');
-        const dist = getAnyValue(item, 'DISTRITO').replace(/,/g, '');
-        const prov = getAnyValue(item, 'PROVINCIA').replace(/,/g, '');
-        const mod = getAnyValue(item, 'MODULO', 'TIPO MODULO').replace(/,/g, '');
-        const tlf = getAnyValue(item, 'TELEF.', 'CELULAR').replace(/,/g, '');
+        const nombre = getAnyValue(item, 'POSTULANTE', 'NOMBRE COMPLETO');
+        const estado = getExpedienteStatus(item);
+        const dist = getAnyValue(item, 'DISTRITO');
+        const prov = getAnyValue(item, 'PROVINCIA');
+        const mod = getAnyValue(item, 'MODULO', 'TIPO MODULO');
+        const tlf = getAnyValue(item, 'TELEF.', 'CELULAR');
 
-        csv += `"${dni}","${nombre}","${estado}","${dist}","${prov}","${mod}","${tlf}"\n`;
+        csv += [dni, nombre, estado, dist, prov, mod, tlf].map(csvCell).join(',') + '\r\n';
       });
 
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -1142,10 +1174,12 @@
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      URL.revokeObjectURL(url);
       showToast('Exportación CSV descargada.', 'success');
     }
 
     async function renderSummaryTable() {
+      rawResumenRows = [];
       const tbody = document.getElementById('summaryTableBody');
       if (!tbody) return;
 
@@ -1266,6 +1300,7 @@
                             cell1.toUpperCase().includes(selectedDist);
           
           const isGrandTotal = cell0.toUpperCase().includes('TOTAL GENERAL') || cell1.toUpperCase().includes('TOTAL GENERAL');
+          if (isGrandTotal) continue;
 
           if (isTotalRow && !isGrandTotal) {
             if (!currentDist.toUpperCase().includes(selectedDist)) continue;
@@ -1274,7 +1309,8 @@
           }
         }
 
-        if (sectorQuery !== '' && !isTotalRow) {
+        if (sectorQuery !== '' && isTotalRow) continue;
+        if (sectorQuery !== '') {
           const matchSector = cell2.toLowerCase().includes(sectorQuery) || cell1.toLowerCase().includes(sectorQuery);
           if (!matchSector) continue;
         }
@@ -1313,6 +1349,7 @@
         html += `</tr>`;
       }
 
+      if (dataRowCounter === 0) html += `<tr><td colspan="${Math.max(...rawResumenRows.map(row => row.length))}" class="p-4 text-center text-slate-500">No se encontraron sectores con esos filtros.</td></tr>`;
       tbody.innerHTML = html;
     }
 
@@ -1339,15 +1376,23 @@
         if (sheetName) updatesBySheet[sheetName] = {};
         tab.querySelectorAll('.kardex-input').forEach(input => {
           const key = input.getAttribute('data-key');
-          if (key === 'ESTADO' && input.value.trim() === input.dataset.originalValue) return;
+          if (input.dataset.originalValue !== undefined && input.value.trim() === input.dataset.originalValue.trim()) return;
           if (key && sheetName) updatesBySheet[sheetName][key] = input.value.trim();
         });
+        if (sheetName && !Object.keys(updatesBySheet[sheetName]).length) delete updatesBySheet[sheetName];
       });
-      document.querySelectorAll('#obsTextarea, #kardexContent select.kardex-input').forEach(input => {
+      document.querySelectorAll('#obsTextarea, #expedienteStatusSelect').forEach(input => {
         const key = input.getAttribute('data-key');
-        if (key === 'ESTADO' && input.value.trim() === input.dataset.originalValue) return;
+        if (input.dataset.originalValue !== undefined && input.value.trim() === input.dataset.originalValue.trim()) return;
         if (key) updates[key] = input.value.trim();
       });
+
+      if (!Object.keys(updates).length && !Object.keys(updatesBySheet).length && !photosState.modulo.base64 && !photosState.dniAnverso.base64 && !photosState.dniReverso.base64) {
+        showToast('No hay cambios por guardar.', 'info');
+        saveBtn.innerHTML = originalText;
+        saveBtn.disabled = false;
+        return;
+      }
 
       const payload = {
         dni: activeDni,
@@ -1588,16 +1633,20 @@
 
     function canonicalEstado(value) {
       const status = normalizeLookupText(value);
-      if (status.includes('OBSERVADO')) return 'OBSERVADO';
-      if (status.includes('TRAMITE')) return 'EN TRÁMITE';
-      if (status.includes('SUBSANADO')) return 'SUBSANADO';
-      if (status.includes('APTO')) return 'APTO';
-      if (status.includes('INADMISIBLE')) return 'INADMISIBLE';
+      if (status === 'OBSERVADO') return 'OBSERVADO';
+      if (status === 'EN TRAMITE' || status === 'TRAMITE') return 'EN TRÁMITE';
+      if (status === 'SUBSANADO') return 'SUBSANADO';
+      if (status === 'APTO') return 'APTO';
+      if (status === 'INADMISIBLE') return 'INADMISIBLE';
       return '';
     }
 
     function renderKardex(dni) {
       const b = allData[dni];
+      if (photosDni !== dni) {
+        ['modulo', 'dniAnverso', 'dniReverso'].forEach(type => { photosState[type].base64 = null; });
+        photosDni = dni;
+      }
       const container = document.getElementById('kardexContent');
       
       const nombre = getAnyValue(b, 'POSTULANTE', 'NOMBRE COMPLETO');
@@ -1711,7 +1760,7 @@
               <label class="block font-bold text-slate-700 text-[11px] uppercase mb-1">
                 <i class="fa-solid fa-flag text-teal-600 mr-1"></i> Estado del Expediente:
               </label>
-              <select data-key="ESTADO" data-original-value="${estadoCode}" class="kardex-input bg-white border border-slate-300 rounded px-2.5 py-1.5 font-bold text-xs text-slate-800 focus:outline-none focus:border-teal-500">
+              <select id="expedienteStatusSelect" data-key="ESTADO" data-expediente-status data-original-value="${estadoCode}" onchange="syncKardexStatus(this)" class="kardex-input bg-white border border-slate-300 rounded px-2.5 py-1.5 font-bold text-xs text-slate-800 focus:outline-none focus:border-teal-500">
                 <option value="" ${estadoCode === '' ? 'selected' : ''}>⚪ SIN ESTADO — PENDIENTE DE VALIDAR</option>
                 <option value="OBSERVADO" ${estadoCode === 'OBSERVADO' ? 'selected' : ''}>🔴 OBSERVADO</option>
                 <option value="EN TRÁMITE" ${estadoCode === 'EN TRÁMITE' ? 'selected' : ''}>🟡 EN TRÁMITE</option>
@@ -1725,7 +1774,7 @@
               <label class="block font-bold text-rose-700 text-[11px] uppercase mb-1">
                 <i class="fa-solid fa-triangle-exclamation text-rose-600 mr-1"></i> Detalle de Observación (Sincronizado con Drive y WhatsApp):
               </label>
-              <input type="text" id="obsTextarea" data-key="OBSERVACION" value="${observacionVal !== '-' ? observacionVal : ''}" placeholder="Escriba la observación aquí..." class="kardex-input w-full bg-white border border-rose-200 rounded px-3 py-1.5 text-xs text-rose-900 font-semibold focus:outline-none focus:border-rose-500">
+              <input type="text" id="obsTextarea" data-key="OBSERVACION" data-original-value="${escapeHtml(observacionVal !== '-' ? observacionVal : '')}" value="${escapeHtml(observacionVal !== '-' ? observacionVal : '')}" placeholder="Escriba la observación aquí..." class="kardex-input w-full bg-white border border-rose-200 rounded px-3 py-1.5 text-xs text-rose-800 font-semibold focus:outline-none focus:border-rose-500">
             </div>
 
           </div>
@@ -1781,16 +1830,28 @@
       `;
     }
 
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[char]));
+    }
+
     function renderEditableField(keyName, value) {
-      const displayVal = (value !== null && value !== undefined && value !== '-') ? value : '';
+      const displayVal = (value !== null && value !== undefined && value !== '-') ? String(value) : '';
+      const safeKey = escapeHtml(keyName);
+      const safeVal = escapeHtml(displayVal);
+      if (['ESTADO', 'ESTADO EXPEDIENTE', 'ESTADO DE TRAMITE', 'ESTADO TRAMITE'].includes(normalizeLookupText(keyName))) {
+        const initial = canonicalEstado(displayVal);
+        const options = ['', 'OBSERVADO', 'EN TRÁMITE', 'SUBSANADO', 'APTO', 'INADMISIBLE'].map(status => `<option value="${status}" ${status === initial ? 'selected' : ''}>${status || 'SIN ESTADO — PENDIENTE DE VALIDAR'}</option>`).join('');
+        return `<div class="bg-slate-50 p-2.5 rounded-lg border border-slate-200"><label class="text-[11px] font-medium text-slate-400 block mb-1">${safeKey}</label><select data-key="${safeKey}" data-expediente-status data-original-value="${initial}" onchange="syncKardexStatus(this)" class="kardex-input w-full bg-white rounded p-1 text-sm">${options}</select></div>`;
+      }
+      const readOnly = ['DNI', 'DNI TITULAR', 'DNI/CE'].includes(normalizeLookupText(keyName)) ? 'readonly title="El DNI identifica al beneficiario en todas las pestañas."' : '';
       const isFileField = keyName.toUpperCase().includes('FOTO') || keyName.toUpperCase().includes('PLANO') || keyName.toUpperCase().includes('DOC');
 
       if (isFileField && displayVal.startsWith('http')) {
         return `
           <div class="bg-teal-50/70 p-2.5 rounded-lg border border-teal-200 flex items-center justify-between">
             <div>
-              <label class="text-[11px] font-bold text-teal-800 block mb-0.5 truncate">${keyName}</label>
-              <a href="${displayVal}" target="_blank" class="text-xs text-teal-700 hover:underline font-bold flex items-center gap-1">
+              <label class="text-[11px] font-bold text-teal-800 block mb-0.5 truncate">${safeKey}</label>
+              <a href="${safeVal}" target="_blank" rel="noopener" class="text-xs text-teal-700 hover:underline font-bold flex items-center gap-1">
                 <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i> Ver Documento / Foto
               </a>
             </div>
@@ -1801,8 +1862,8 @@
 
       return `
         <div class="bg-slate-50 p-2.5 rounded-lg border border-slate-200/80">
-          <label class="text-[11px] font-medium text-slate-400 block mb-1 truncate">${keyName}</label>
-          <input type="text" data-key="${keyName}" value="${displayVal}" 
+          <label class="text-[11px] font-medium text-slate-400 block mb-1 truncate">${safeKey}</label>
+          <input type="text" data-key="${safeKey}" data-original-value="${safeVal}" value="${safeVal}" ${readOnly}
                  placeholder="Escriba aquí..." 
                  class="kardex-input w-full bg-transparent font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-1 focus:ring-teal-500 rounded px-1.5 py-0.5 border border-transparent focus:border-slate-300 transition text-sm">
         </div>
@@ -1817,6 +1878,10 @@
       });
       document.getElementById(tabId).classList.remove('hidden');
       e.currentTarget.classList.add('bg-white', 'border-t-2', 'border-teal-500', 'text-teal-700', 'font-bold');
+    }
+
+    function syncKardexStatus(source) {
+      document.querySelectorAll('#kardexContent [data-expediente-status]').forEach(input => { input.value = source.value; });
     }
 
     function filterBeneficiaries() {
