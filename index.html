@@ -884,7 +884,7 @@
       clone.style.maxHeight = 'none';
       clone.style.overflow = 'visible';
       if (element.id === 'resumenTableContainer') {
-        clone.style.minHeight = `${element.scrollHeight}px`;
+          clone.style.minHeight = '0';
         clone.style.height = 'auto';
         clone.classList.remove('max-h-[60vh]', 'overflow-auto', 'custom-scrollbar');
         const table = clone.querySelector('table');
