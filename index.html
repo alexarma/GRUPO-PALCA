@@ -852,13 +852,20 @@
       }
 
       try {
+        const pdfData = await html2pdf().set({
+          margin: 0.3,
+          image: { type: 'jpeg', quality: 0.95 },
+          html2canvas: { scale: 2, useCORS: true },
+          jsPDF: { unit: 'in', format: 'a4', orientation: 'landscape' }
+        }).from(preparePdfElement(document.getElementById('resumenTableContainer'))).toPdf().outputPdf('datauristring');
         await postToAppsScript({
             action: 'sendSummaryEmail',
             email: recipient,
-            csvData: csvData
+            csvData: csvData,
+            pdfBase64: pdfData.split(',')[1]
         });
 
-        showToast(`✅ Resumen enviado a ${recipient} con CSV y resumen HTML con colores.`, 'success');
+        showToast(`✅ Resumen enviado a ${recipient} con PDF en colores y CSV.`, 'success');
         closeSendEmailModal();
       } catch (err) {
         showToast(`Error al enviar el correo: ${err.message || 'no se pudo confirmar el envío.'}`, 'error');
