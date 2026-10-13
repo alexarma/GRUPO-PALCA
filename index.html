@@ -856,7 +856,7 @@
           margin: 0.3,
           image: { type: 'jpeg', quality: 0.95 },
           html2canvas: { scale: 2, useCORS: true },
-          jsPDF: { unit: 'in', format: 'a4', orientation: 'landscape' }
+          jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' }
         }).from(preparePdfElement(document.getElementById('resumenTableContainer'))).toPdf().outputPdf('datauristring');
         await postToAppsScript({
             action: 'sendSummaryEmail',
@@ -892,6 +892,7 @@
           table.querySelectorAll('td, th').forEach(cell => {
             cell.style.whiteSpace = 'normal';
             cell.style.overflowWrap = 'anywhere';
+            cell.style.wordBreak = 'break-word';
             cell.style.fontSize = '9px';
             cell.style.padding = '4px 3px';
             cell.style.width = '';
@@ -932,7 +933,7 @@
         filename:     `Resumen_General_Grupo_Palca_${new Date().toISOString().slice(0,10)}.pdf`,
         image:        { type: 'jpeg', quality: 0.98 },
         html2canvas:  { scale: 2, useCORS: true },
-        jsPDF:        { unit: 'in', format: 'a4', orientation: 'landscape' }
+        jsPDF:        { unit: 'in', format: 'a3', orientation: 'landscape' }
       };
 
       showToast('Generando archivo PDF...', 'info');
