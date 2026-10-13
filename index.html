@@ -883,6 +883,25 @@
       clone.querySelectorAll('.custom-scrollbar').forEach(node => { node.style.maxHeight = 'none'; node.style.overflow = 'visible'; });
       clone.style.maxHeight = 'none';
       clone.style.overflow = 'visible';
+      if (element.id === 'resumenTableContainer') {
+        const table = clone.querySelector('table');
+        if (table) {
+          table.style.width = '100%';
+          table.style.minWidth = '0';
+          table.style.tableLayout = 'fixed';
+          table.querySelectorAll('td, th').forEach(cell => {
+            cell.style.whiteSpace = 'normal';
+            cell.style.overflowWrap = 'anywhere';
+            cell.style.fontSize = '9px';
+            cell.style.padding = '4px 3px';
+          });
+          const columnCount = Math.max(...Array.from(table.rows).map(row => row.cells.length));
+          const firstWidths = [4, 12, 24];
+          Array.from(table.rows).forEach(row => Array.from(row.cells).forEach((cell, index) => {
+            if (cell.colSpan === 1) cell.style.width = `${index < 3 ? firstWidths[index] : 60 / Math.max(1, columnCount - 3)}%`;
+          }));
+        }
+      }
       return clone;
     }
 
