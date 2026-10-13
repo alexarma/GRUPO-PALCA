@@ -892,7 +892,12 @@
           table.querySelectorAll('td, th').forEach(cell => {
             cell.style.whiteSpace = 'normal';
             cell.style.overflowWrap = 'anywhere';
-            cell.style.wordBreak = 'break-word';
+            cell.style.wordBreak = 'break-all';
+            cell.style.lineHeight = '1.5';
+            if (cell.tagName === 'TH') {
+              cell.style.whiteSpace = 'pre-line';
+              cell.textContent = cell.textContent.trim().replace(/\s+/g, ' ').replace(/\/\s*/g, '/\n');
+            }
             cell.style.fontSize = '9px';
             cell.style.padding = '4px 3px';
             cell.style.width = '';
